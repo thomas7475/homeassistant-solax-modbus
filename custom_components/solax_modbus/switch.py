@@ -36,6 +36,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                 hub.computedSwitches[switch_info.key] = switch_info
             if switch_info.sensor_key is not None:
                 hub.writeLocals[switch_info.sensor_key] = switch_info
+                hub.entity_dependencies[switch_info.key] = switch_info.sensor_key
             entities.append(switch)
 
     async_add_entities(entities)

@@ -31,6 +31,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             if select_info.write_method==WRITE_DATA_LOCAL:
                 if (select_info.initvalue is not None): hub.data[select_info.key] = select_info.initvalue
                 hub.writeLocals[select_info.key] = select_info
+                hub.entity_dependencies[select_info.key] = select_info.key # Assumes sensor has the same key
             entities.append(select)
 
     async_add_entities(entities)

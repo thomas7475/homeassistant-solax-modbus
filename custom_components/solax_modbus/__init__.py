@@ -262,31 +262,38 @@ def Gen4Timestring(numb):
     return f"{h:02d}:{m:02d}"
 
 
-def is_entity_enabled(hass, hubname, descriptor): # Check if the entity is enabled in Home Assistant
-    unique_id = f"{hubname}_{descriptor.key}"
-    platforms = ("sensor", "select", "number", "switch",) # if correcpondig entity in other platform is enabled, return enabled
-    res = False
-    for platform in platforms:
-        #Check if an entity is enabled in the entity registry
-        registry = er.async_get(hass)
-        entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id) # strange, platform and domain should be swapped, but that did not work
-        entity_entry = registry.async_get(entity_id)
+def is_entity_enabled(hass, hub, descriptor): # Check if the entity is enabled in Home Assistant 
+    """ 
+    Check if an entity is enabled in the entity registry, checking across multiple platforms. 
+    """
+    unique_id     = f"{hub._name}_{descriptor.key}"
+    unique_id_alt = f"{hub._name}.{descriptor.key}" # dont knnow why 
+    platforms = ("sensor", "select", "number", "switch", "button")
+    registry = er.async_get(hass)
 
-        # If an entity is not in the registry, it is probably a new one.
-        # return True #Apply the default specified in the descriptor
-        if entity_entry is None:
-            _LOGGER.debug(f"Entity {entity_id} not found in entity registry, "
-             f"applying default {descriptor.entity_registry_enabled_default}"
-             )
-            res = descriptor.entity_registry_enabled_default
-            if res: return True
-        
-        # Otherwise, return the inverse of the 'disabled' attribute
-        elif entity_entry.disabled:
-            _LOGGER.debug(f"Entity {entity_id} is disabled, scanning other platforms.")
-            res = False # and continue checking other platforms
-        else: return True
-    return res # this may never be reached
+    entity_found = False
+    # First, check if there is an existing enabled entity in the registry for this unique_id. 
+    for platform in platforms:
+        entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
+        if entity_id: _LOGGER.debug(f"entity_id for {unique_id} on platform {platform} is now {entity_id}")
+        else:
+            entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id_alt)
+            _LOGGER.debug(f"entity_id for alt {unique_id_alt} on platform {platform} is now {entity_id}")
+        if entity_id:
+            entity_found = True
+            entity_entry = registry.async_get(entity_id)
+            if entity_entry and not entity_entry.disabled:
+                _LOGGER.debug(f"Entity {entity_id} is enabled, returning True.")
+                return True # Found an enabled entity, no need to check further 
+    # If we get here, no enabled entity was found across all platforms.
+    if entity_found:
+        # At least one entity exists for this unique_id, but all are disabled. Respect the user's choice. 
+        _LOGGER.debug(f"Entity with unique_id {unique_id} was found but is disabled across all relevant platforms.")
+        return False
+    else:
+        # No entity exists for this unique_id on any platform. Treat it as a new entity. 
+        _LOGGER.debug(f"Entity with unique_id {unique_id} not found in entity registry, " f"applying default: {descriptor.entity_registry_enabled_default}")
+        return descriptor.entity_registry_enabled_default
 
 
 @dataclass
@@ -383,6 +390,7 @@ class SolaXModbusHub:
         self.sleepzero = []  # sensors that will be set to zero in sleepmode
         self.sleepnone = []  # sensors that will be cleared in sleepmode
         self.writequeue = {}  # queue requests when inverter is in sleep mode
+        self.entity_dependencies = {} # Maps a control entity key to its sensor data source key
         _LOGGER.debug(f"{self.name}: ready to call plugin to determine inverter type")
         self.plugin = plugin.plugin_instance  # getPlugin(name).plugin_instance
         self.wakeupButton = None
@@ -1081,6 +1089,23 @@ class SolaXModbusHub:
                             )
         return res
 
+# --------------------------------------------- Check if sensor is a dependency -----------------------------------------------
+    # Add this new helper method
+    def _is_dependency_for_enabled_control(self, sensor_key: str) -> bool:
+        """Check if a sensor is a required data source for any enabled control."""
+        for control_key, source_key in self.entity_dependencies.items():
+            if source_key == sensor_key:
+                # This sensor is a dependency. Now, is the control that needs it enabled?
+                control_descr = self.sensorEntities.get(control_key) \
+                                or self.numberEntities.get(control_key) \
+                                or self.switchEntities.get(control_key)
+                # Note: This lookup assumes the select/button entities are also stored in a hub dictionary,
+                # which should be done for consistency if it isn't already.
+
+                if control_descr and is_entity_enabled(self._hass, self._name, control_descr):
+                    _LOGGER.debug(f"Sensor '{sensor_key}' is required by enabled control '{control_key}'.")
+                    return True
+        return False
 
 # --------------------------------------------- Sorting and grouping of entities -----------------------------------------------
 
@@ -1112,7 +1137,15 @@ class SolaXModbusHub:
                 d_key = descr.key
                 d_regtype = descr.register_type # HOLDING or INPUT
 
-            if d_enabled:
+            # Even if the sensor itself is disabled, check if it's a required dependency for another ENABLED control.
+            is_needed_as_dependency = self._is_dependency_for_enabled_control(d_key)
+            # The final decision: should we poll this register?
+            should_poll = d_enabled or is_needed_as_dependency
+
+            if should_poll and not d_enabled:
+                _LOGGER.debug(f"Forcing register 0x{reg:x} ({d_key}) to be polled because it is a dependency for an enabled entity.")
+
+            if should_poll: # This line was originally 'if d_enabled:'
                 if (d_newblock or ((reg - start) > block_size)):
                     if ((end - start) > 0):
                         _LOGGER.debug(f"Starting new block at 0x{reg:x} ")

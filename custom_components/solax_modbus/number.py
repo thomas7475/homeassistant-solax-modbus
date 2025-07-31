@@ -46,6 +46,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             if newdescr.write_method == WRITE_DATA_LOCAL:
                 hub.writeLocals[newdescr.key] = newdescr
             hub.numberEntities[newdescr.key] = number
+            hub.entity_dependencies[newdescr.key] = newdescr.key # Assumes sensor has the same key
             entities.append(number)
     async_add_entities(entities)
     return True
