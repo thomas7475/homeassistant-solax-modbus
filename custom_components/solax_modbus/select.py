@@ -35,6 +35,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                 if (select_info.initvalue is not None): hub.data[select_info.key] = select_info.initvalue
                 hub.writeLocals[select_info.key] = select_info
             hub.selectEntities[select_info.key] = select
+            entities.append(select)
 
     async_add_entities(entities)
     return True
