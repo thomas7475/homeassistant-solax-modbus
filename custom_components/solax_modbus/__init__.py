@@ -1045,9 +1045,9 @@ class SolaXModbusHub:
         if not self.localsLoaded:
             await self._hass.async_add_executor_job(self.loadLocalData)
         for key in self.computedSensors:
-            descr = self.computedSensors[key]
+            # Only calculate the value and store it in the hub's data dictionary.
+            # Do NOT call modbus_data_updated() from here Race Condition:it calls hub.rebuild_blocks() before async_add_entities is called.
             data[key] = descr.value_function(0, descr, data)
-            sens = self.sensorEntities[key]
             #_LOGGER.debug(f"quickly updating state for computed sensor {sens} {key} {data[descr.key]} ")
             if sens and not descr.internal: sens.modbus_data_updated() # publish state to GUI and automations faster
 
