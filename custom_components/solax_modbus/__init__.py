@@ -397,6 +397,7 @@ class SolaXModbusHub:
         self.numberEntities = {}  # all number entities, indexed by key
         self.selectEntities = {}
         self.switchEntities = {}
+        self.entity_dependencies = {} # Maps a control entity key to its data source sensor key
         # self.preventSensors = {} # sensors with prevent_update = True
         self.writeLocals = {}  # key to description lookup dict for write_method = WRITE_DATA_LOCAL entities
         self.sleepzero = []  # sensors that will be set to zero in sleepmode
@@ -1104,6 +1105,23 @@ class SolaXModbusHub:
                             )
         return res
 
+# --------------------------------------------- Check if sensor is a dependency -----------------------------------------------
+
+    def _is_dependency_for_enabled_control(self, sensor_key: str) -> bool:
+        """Check if a sensor is a required data source for any enabled control."""
+        for control_key, source_key in self.entity_dependencies.items():
+            if source_key == sensor_key:
+                # This sensor is a dependency. Now, is the control that needs it enabled?
+                # We can reuse the logic from should_register_be_loaded, but we need to find the correct descriptor first.
+
+                control_descr = self.numberEntities.get(control_key, {}).entity_description \
+                             or self.selectEntities.get(control_key, {}).entity_description \
+                             or self.switchEntities.get(control_key, {}).entity_description
+
+                if control_descr and should_register_be_loaded(self._hass, self, control_descr):
+                    _LOGGER.debug(f"Sensor '{sensor_key}' is required by enabled control '{control_key}'.")
+                    return True
+        return False
 
 # --------------------------------------------- Sorting and grouping of entities -----------------------------------------------
 
@@ -1120,15 +1138,24 @@ class SolaXModbusHub:
                 d_newblock = False
                 d_enabled = False
                 for sub, d in descr.items():
-                    d_enabled = d_enabled or should_register_be_loaded(self._hass, self, d)
-                    d_newblock = d_newblock or d.newblock 
+                    if should_register_be_loaded(self._hass, self, d): # *** CHANGED LINE: logic delegated to new function
+                        d_enabled = True
+                        break 
+                    #d_newblock = d_newblock or d.newblock 
                     d_unit = d.unit
                     d_wordcount = 1 # not used here
                     d_key = d.key # does not matter which key we use here
                     d_regtype = d.register_type
             else: # normal entity
-                entity_id = f"sensor.{self._name}_{descr.key}"
+                # 1. First, check if the entity itself should be loaded based on its own state or defaults.
                 d_enabled = should_register_be_loaded(self._hass, self, descr)
+                
+                # 2. If it's disabled, check if it's a required dependency for another ENABLED control.
+                if not d_enabled:
+                    if self._is_dependency_for_enabled_control(descr.key):
+                        d_enabled = True
+                        _LOGGER.debug(f"Forcing poll for disabled sensor '{descr.key}' as it's a needed dependency.")
+                        
                 d_newblock = descr.newblock
                 d_unit = descr.unit
                 d_wordcount = descr.wordcount

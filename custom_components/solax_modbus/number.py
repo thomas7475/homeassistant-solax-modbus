@@ -44,6 +44,8 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                 newdescr.name = inverter_name_suffix + newdescr.name
             number = SolaXModbusNumber(hub_name, hub, modbus_addr, hub.device_info, newdescr)
             if newdescr.write_method == WRITE_DATA_LOCAL:
+                # The number entity depends on the sensor with the same key
+                hub.entity_dependencies[newdescr.key] = newdescr.key 
                 hub.writeLocals[newdescr.key] = newdescr
             hub.numberEntities[newdescr.key] = number
             entities.append(number)
