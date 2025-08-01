@@ -1102,7 +1102,7 @@ class SolaXModbusHub:
                 # Note: This lookup assumes the select/button entities are also stored in a hub dictionary,
                 # which should be done for consistency if it isn't already.
 
-                if control_descr and is_entity_enabled(self._hass, self._name, control_descr):
+                if control_descr and is_entity_enabled(self._hass, self, control_descr):
                     _LOGGER.debug(f"Sensor '{sensor_key}' is required by enabled control '{control_key}'.")
                     return True
         return False
@@ -1122,7 +1122,7 @@ class SolaXModbusHub:
                 d_newblock = False
                 d_enabled = False
                 for sub, d in descr.items():
-                    d_enabled = d_enabled or d.internal or is_entity_enabled(self._hass, self._name, d) 
+                    d_enabled = d_enabled or d.internal or is_entity_enabled(self._hass, self, d)
                     d_newblock = d_newblock or d.newblock 
                     d_unit = d.unit
                     d_wordcount = 1 # not used here
@@ -1130,7 +1130,7 @@ class SolaXModbusHub:
                     d_regtype = d.register_type
             else: # normal entity
                 entity_id = f"sensor.{self._name}_{descr.key}"
-                d_enabled = descr.internal or is_entity_enabled(self._hass, self._name, descr) 
+                d_enabled = descr.internal or is_entity_enabled(self._hass, self, descr)
                 d_newblock = descr.newblock
                 d_unit = descr.unit
                 d_wordcount = descr.wordcount
