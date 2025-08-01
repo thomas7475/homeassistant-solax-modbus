@@ -29,12 +29,12 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             if not (select_info.name.startswith(inverter_name_suffix)): select_info.name = inverter_name_suffix + select_info.name
             select = SolaXModbusSelect(hub_name, hub, modbus_addr, hub.device_info, select_info)
             if select_info.write_method==WRITE_DATA_LOCAL:
+                # Use the explicit sensor_key if provided, otherwise fall back to the select's own key.
+                dependency_key = getattr(select_info, 'sensor_key', select_info.key)
+                hub.entity_dependencies[select_info.key] = dependency_key
                 if (select_info.initvalue is not None): hub.data[select_info.key] = select_info.initvalue
                 hub.writeLocals[select_info.key] = select_info
-                # The select entity depends on the sensor with the same key
-                hub.entity_dependencies[select_info.key] = select_info.key
             hub.selectEntities[select_info.key] = select
-            entities.append(select)
 
     async_add_entities(entities)
     return True
