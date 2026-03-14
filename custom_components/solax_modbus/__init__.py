@@ -694,14 +694,14 @@ class SolaXModbusHub:
                         name=plugin_name,
                         serial_number=self.seriesnumber,
                     )
+                    if getattr(self, "_stopping", False):
+                        return
+                    await self._hass.config_entries.async_forward_entry_setups(self.entry, PLATFORMS)
+                    self._platforms_forwarded = True
+                    _LOGGER.warning(f"{self._name}: deferred setup complete – platforms forwarded successfully")
+                    return
                 else:
                     _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} – inverter still not responding, will retry in {interval}s")
-                if getattr(self, "_stopping", False):
-                    return
-                await self._hass.config_entries.async_forward_entry_setups(self.entry, PLATFORMS)
-                self._platforms_forwarded = True
-                _LOGGER.warning(f"{self._name}: deferred setup complete – platforms forwarded successfully")
-                return
             except Exception as ex:
                 _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} failed: {ex}")
             # Wait and try again
