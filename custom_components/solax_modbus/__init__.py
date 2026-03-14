@@ -1137,6 +1137,7 @@ class SolaXModbusHub:
             _LOGGER.debug(f"{self._name}: Inverter is not connected, trying to connect")
             await self._client.connect()
             await asyncio.sleep(1)
+        _LOGGER.debug(f"{self._name}: _check_connection result: connected={self._client.connected}")
         return self._client.connected
 
     async def is_online(self) -> bool:
@@ -1148,11 +1149,20 @@ class SolaXModbusHub:
         _LOGGER.debug(
             f"{self._name}: Trying to connect to Inverter at {self._client.comm_params.host}:{self._client.comm_params.port} connected: {self._client.connected} ",
         )
+        # Skip redundant connect if already connected – calling connect() on an open serial
+        # port retriggers the exclusive lock acquisition and causes ERRNO 11
+        if self._client.connected:
+            _LOGGER.debug(f"{self._name}: async_connect: already connected, skipping")
+            return
         await self._client.connect()
 
     async def async_read_holding_registers(self, unit: int, address: int, count: int) -> Any:
         """Read holding registers using high-level pymodbus API."""
+        _lock_start = asyncio.get_event_loop().time()
         async with self._lock:
+            _lock_wait = asyncio.get_event_loop().time() - _lock_start
+            if _lock_wait > 2.0:
+                _LOGGER.warning(f"{self._name}: lock wait {_lock_wait:.1f}s before holding read at 0x{address:x} – possible deadlock or overload")
             if getattr(self, "_stopping", False):
                 return None
             await self._check_connection()
@@ -1166,19 +1176,28 @@ class SolaXModbusHub:
             except ModbusException as exception_error:
                 error = f"Error: device: {unit} address: 0x{address:x} -> {exception_error!s}"
                 _LOGGER.error(error)
-                # Flush transport: close + short pause + reconnect to clear any late/queued frames
+                # Skip reconnect entirely during shutdown – avoids dirty port state on next boot
+                if getattr(self, "_stopping", False):
+                    _LOGGER.debug(f"{self._name}: ModbusException during shutdown – skipping reconnect")
+                    return None
+                # Flush transport: close + longer pause for serial lock release + reconnect
                 _LOGGER.debug(f"{self._name}: ModbusException – flushing transport and reconnecting")
+                reconnect_delay = 1.0 if getattr(self, "interface", None) == "serial" else 0.2
                 try:
                     self._client.close()
                 finally:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(reconnect_delay)
                     await self._client.connect()
                 return None
         return resp
 
     async def async_read_input_registers(self, unit: int, address: int, count: int) -> Any:
         """Read input registers using high-level pymodbus API."""
+        _lock_start = asyncio.get_event_loop().time()
         async with self._lock:
+            _lock_wait = asyncio.get_event_loop().time() - _lock_start
+            if _lock_wait > 2.0:
+                _LOGGER.warning(f"{self._name}: lock wait {_lock_wait:.1f}s before input read at 0x{address:x} – possible deadlock or overload")
             if getattr(self, "_stopping", False):
                 return None
             await self._check_connection()
@@ -1192,12 +1211,17 @@ class SolaXModbusHub:
             except ModbusException as exception_error:
                 error = f"Error: device: {unit} address: 0x{address:x} -> {exception_error!s}"
                 _LOGGER.error(error)
-                # Flush transport: close + short pause + reconnect to clear any late/queued frames
+                # Skip reconnect entirely during shutdown – avoids dirty port state on next boot
+                if getattr(self, "_stopping", False):
+                    _LOGGER.debug(f"{self._name}: ModbusException during shutdown – skipping reconnect")
+                    return None
+                # Flush transport: close + longer pause for serial lock release + reconnect
                 _LOGGER.debug(f"{self._name}: ModbusException – flushing transport and reconnecting")
+                reconnect_delay = 1.0 if getattr(self, "interface", None) == "serial" else 0.2
                 try:
                     self._client.close()
                 finally:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(reconnect_delay)
                     await self._client.connect()
                 return None
         return resp
