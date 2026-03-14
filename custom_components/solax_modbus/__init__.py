@@ -670,7 +670,10 @@ class SolaXModbusHub:
         """Keep trying to detect inverter type and forward platforms once online."""
         import asyncio
 
+        _attempt = 0
         while (not getattr(self, "_stopping", False)) and (not self._platforms_forwarded):
+            _attempt += 1
+            _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} – inverter not yet detected, retrying (interval={interval}s)")
             try:
                 await self.async_connect()
                 await self._check_connection()
@@ -679,7 +682,7 @@ class SolaXModbusHub:
                 inv = await self.plugin.async_determineInverterType(self, self.config)
                 if inv not in (None, 0):
                     self._invertertype = inv
-                    _LOGGER.debug(f"{self._name}: inverter detected during deferred setup (type={inv}) – forwarding platforms")
+                    _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} – inverter detected (type={inv}), forwarding platforms")
                     # Prepare/refresh device_info in case it wasn't set
                     plugin_name = self.plugin.plugin_name
                     if self.inverterNameSuffix:
@@ -691,16 +694,21 @@ class SolaXModbusHub:
                         name=plugin_name,
                         serial_number=self.seriesnumber,
                     )
+                else:
+                    _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} – inverter still not responding, will retry in {interval}s")
                 if getattr(self, "_stopping", False):
                     return
                 await self._hass.config_entries.async_forward_entry_setups(self.entry, PLATFORMS)
                 self._platforms_forwarded = True
+                _LOGGER.warning(f"{self._name}: deferred setup complete – platforms forwarded successfully")
                 return
             except Exception as ex:
-                _LOGGER.debug(f"{self._name}: deferred setup iteration failed: {ex}")
+                _LOGGER.warning(f"{self._name}: deferred setup attempt #{_attempt} failed: {ex}")
             # Wait and try again
+            _LOGGER.warning(f"{self._name}: deferred setup waiting {interval}s before next attempt")
             for _ in range(interval * 10):  # sleep in 0.1s steps to remain abortable
                 if getattr(self, "_stopping", False):
+                    _LOGGER.debug(f"{self._name}: deferred setup loop cancelled during wait (hub stopping)")
                     return
                 await asyncio.sleep(0.1)
 
